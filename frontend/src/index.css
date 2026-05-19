@@ -1,0 +1,171 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1f2937;
+  background: #f5f7f3;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(199, 240, 0, 0.20), transparent 30%),
+    linear-gradient(135deg, #f5f7f3 0%, #e8eee5 100%);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+button, input, select, textarea {
+  font: inherit;
+}
+
+.phone-safe-bottom {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+}
+
+/* Young Stunna motion upgrades: soft mobile-app animation only. */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes badge-pop {
+  0% { transform: scale(0.92); opacity: 0; }
+  70% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -10px, 0); }
+}
+
+@keyframes scooter-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes wheel-spin {
+  to { stroke-dashoffset: -46; }
+}
+
+@keyframes road-move {
+  from { transform: translateX(110%); }
+  to { transform: translateX(-160%); }
+}
+
+@keyframes orb-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-18px, 16px) scale(1.08); }
+}
+
+.animate-page-enter { animation: page-enter 420ms cubic-bezier(.2,.8,.2,1) both; }
+.animate-rise-in { animation: rise-in 520ms cubic-bezier(.2,.8,.2,1) both; }
+.animate-card-in { animation: card-in 460ms cubic-bezier(.2,.8,.2,1) both; }
+.animate-list-item { animation: card-in 420ms cubic-bezier(.2,.8,.2,1) both; }
+.animate-toast { animation: toast-in 260ms cubic-bezier(.2,.8,.2,1) both; }
+.animate-badge-pop { animation: badge-pop 260ms cubic-bezier(.2,.8,.2,1) both; }
+.animate-float-slow { animation: float-slow 3.4s ease-in-out infinite; }
+.scooter-bounce { animation: scooter-bounce 850ms ease-in-out infinite; transform-origin: center; }
+.wheel-spin { animation: wheel-spin 900ms linear infinite; transform-origin: center; }
+.moving-road .road-line {
+  position: absolute;
+  top: 18px;
+  height: 4px;
+  width: 70px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.45);
+  animation: road-move 1.45s linear infinite;
+}
+.moving-road .road-line:nth-child(2) { animation-delay: .35s; }
+.moving-road .road-line:nth-child(3) { animation-delay: .7s; }
+.animated-orb { animation: orb-drift 5s ease-in-out infinite; }
+.road-wave { clip-path: ellipse(78% 64% at 50% 100%); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .phone-safe-bottom {
+    padding-bottom: calc(6.75rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* Hide scrollbar but keep page scrollable */
+html,
+body,
+#root {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide visible scrollbars but keep scrolling working */
+html,
+body,
+#root,
+main,
+section,
+div {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar,
+main::-webkit-scrollbar,
+section::-webkit-scrollbar,
+div::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
