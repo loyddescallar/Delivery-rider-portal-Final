@@ -296,7 +296,7 @@ function LoginScreen({ onLogin, message }) {
           </button>
 
           <p className="text-center text-xs text-slate-500">
-            Credentials: rider@youngstunna.com / password123
+           Descallar, Bello, Jebulan, Delos Santos
           </p>
         </form>
       </main>

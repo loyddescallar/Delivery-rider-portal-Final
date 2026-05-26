@@ -7,7 +7,7 @@ require('dotenv').config();
 const db = require('./db');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3600;
 const JWT_SECRET = process.env.JWT_SECRET || 'young_stunna_secret_key_change_me';
 const INTEGRATION_API_KEY = process.env.INTEGRATION_API_KEY || 'demo-integration-key';
 const AUTH_MODE = (process.env.AUTH_MODE || 'external').toLowerCase();
@@ -571,6 +571,115 @@ app.get('/api/integrations/notifications/rider/:riderId', integrationMiddleware,
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Unable to fetch rider notifications.' });
+  }
+});
+
+// Legacy shipment adapter endpoint for Order Management System.
+// The Order Management System can set LEGACY_API=http://localhost:3600
+// and its convert-to-shipment feature will create a rider delivery here.
+app.post('/api/delivery-rider/shipments', async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    const body = req.body || {};
+    const trackingNumber = body.trackingNum || body.tracking_number || body.trackingNumber || `OMS-TRK-${Date.now()}`;
+    const riderId = Number(body.rider_id || body.riderId || process.env.DEFAULT_RIDER_ID || 1);
+    const orderId = body.order_id || body.orderId || body.id || null;
+    const rawStatus = body.shipmentStatus || body.status || 'Pending';
+    const status = allowedStatuses.includes(rawStatus) ? rawStatus : 'Pending';
+
+    const recipientName =
+      body.customerName ||
+      body.customer_name ||
+      body.recipientName ||
+      body.recepientName ||
+      'Order Recipient';
+
+    const recipientContact =
+      body.customerContact ||
+      body.customer_contact ||
+      body.recipientContact ||
+      body.recipient_contact ||
+      body.contactNumber ||
+      'Not provided';
+
+    const recipientAddress =
+      body.deliveryAddress ||
+      body.delivery_address ||
+      body.recipientAddress ||
+      body.recipient_address ||
+      'No delivery address provided';
+
+    const itemDescription =
+      body.item_description ||
+      body.itemDescription ||
+      body.productName ||
+      body.packageDescription ||
+      body.recepientName ||
+      (body.packageWeight ? `Package quantity/weight: ${body.packageWeight}` : 'Order package');
+
+    const totalAmount = Number(body.totalPrice || body.total_amount || body.totalAmount || 0);
+    const paymentMethod = body.paymentMethod || body.payment_method || 'Not specified';
+
+    if (!trackingNumber || !recipientAddress) {
+      return res.status(400).json({ message: 'tracking number and delivery address are required.' });
+    }
+
+    await connection.beginTransaction();
+
+    const [existing] = await connection.execute(
+      'SELECT * FROM deliveries WHERE tracking_number = ? FOR UPDATE',
+      [trackingNumber]
+    );
+
+    let deliveryId;
+
+    if (existing.length) {
+      deliveryId = existing[0].delivery_id;
+      await connection.execute(
+        `UPDATE deliveries
+         SET rider_id = ?, order_id = COALESCE(?, order_id), recipient_name = ?, recipient_contact = ?,
+             recipient_address = ?, item_description = ?, payment_method = ?, total_amount = ?, status = ?
+         WHERE delivery_id = ?`,
+        [riderId, orderId, recipientName, recipientContact, recipientAddress, itemDescription, paymentMethod, totalAmount, status, deliveryId]
+      );
+
+      await connection.execute(
+        'INSERT INTO delivery_status_logs (delivery_id, status, remarks) VALUES (?, ?, ?)',
+        [deliveryId, status, 'Order Management updated this shipment through the legacy shipment adapter.']
+      );
+    } else {
+      const [result] = await connection.execute(
+        `INSERT INTO deliveries
+         (rider_id, order_id, tracking_number, recipient_name, recipient_contact, recipient_address,
+          item_description, payment_method, total_amount, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [riderId, orderId, trackingNumber, recipientName, recipientContact, recipientAddress, itemDescription, paymentMethod, totalAmount, status]
+      );
+
+      deliveryId = result.insertId;
+
+      await connection.execute(
+        'INSERT INTO delivery_status_logs (delivery_id, status, remarks) VALUES (?, ?, ?)',
+        [deliveryId, status, 'Order Management converted this order into a delivery.']
+      );
+    }
+
+    await connection.commit();
+
+    const [rows] = await db.execute('SELECT * FROM deliveries WHERE delivery_id = ?', [deliveryId]);
+
+    res.status(existing.length ? 200 : 201).json({
+      message: existing.length ? 'Shipment updated in Delivery Rider Portal.' : 'Shipment created in Delivery Rider Portal.',
+      shipment: rows[0],
+      delivery: rows[0]
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error(error);
+    res.status(500).json({ message: 'Unable to create shipment from Order Management System.' });
+  } finally {
+    connection.release();
   }
 });
 
