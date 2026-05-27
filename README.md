@@ -1,59 +1,27 @@
 # Delivery Rider Portal
 
-The Delivery Rider Portal is a web-based rider module for managing assigned deliveries. Riders can log in, view delivery tasks, update delivery status, confirm completed deliveries, and review delivery history.
+A web-based module for riders to log in, view assigned deliveries, update delivery status, confirm completed deliveries, and review delivery history.
 
-## System Integration
+## Main Integrations
 
-This project is integrated with the **Authentication System** for rider login and role-based access. It is also connected on the Delivery Rider Portal side with the **Order Management System** through a shipment adapter endpoint.
+- **Authentication System** - handles rider login and role-based access.
+- **Order Management System** - sends assigned orders/shipments to the rider portal.
+- **Customer Tracking Portal** - can read delivery status using a tracking number.
+- **Notification System** - can receive or fetch rider delivery alerts.
+- **Delivery Performance Monitoring System** - can get rider delivery summaries.
+- **Analytics Dashboard System** - can get delivery summary data.
+- **Return Management System** - can send failed/returned delivery records.
 
-## Main Features
+## Tech Stack
 
-- Rider login authentication
-- Rider dashboard
-- View assigned deliveries
-- Update delivery status
-- Confirm completed deliveries
-- View delivery history
-- Order Management shipment adapter
-- Prepared endpoints for tracking, notification, performance, and analytics modules
-
-## Technologies Used
-
-- React.js
-- Node.js
-- Express.js
-- MySQL
-- JWT Authentication
-
-## Project Structure
-
-```text
-Delivery-Rider-Portal-Final
-├── backend
-├── frontend
-├── database
-├── README.md
-└── ORDER_MANAGEMENT_INTEGRATION.md
-```
+React.js, Node.js, Express.js, MySQL, JWT
 
 ## How to Run
 
-### 1. Run the Authentication System
-
-```bash
-npm install
-npm run dev
-```
-
-Default server:
-
-```text
-http://localhost:3000
-```
-
-### 2. Run the Delivery Rider Portal Backend
-
-Create a `.env` file inside the `backend` folder using `backend/.env.example`.
+1. Start XAMPP MySQL and import `database/youngstunna_rider_portal.sql`.
+2. Run the Authentication System on `http://localhost:3000`.
+3. Create `backend/.env` from `backend/.env.example`.
+4. Run the backend:
 
 ```bash
 cd backend
@@ -61,13 +29,7 @@ npm install
 npm start
 ```
 
-Default server:
-
-```text
-http://localhost:5000
-```
-
-### 3. Run the Delivery Rider Portal Frontend
+5. Run the frontend:
 
 ```bash
 cd frontend
@@ -75,30 +37,23 @@ npm install
 npm run dev
 ```
 
-Open the frontend URL shown in the terminal.
-
-## Order Management Connection
-
-The Delivery Rider Portal accepts shipment/order data from the Order Management System using:
+## Backend URL
 
 ```text
-POST http://localhost:5000/api/shipments
+http://localhost:3600
 ```
 
-For more details, see:
+## Main Endpoint List
 
 ```text
-ORDER_MANAGEMENT_INTEGRATION.md
+GET  /api/delivery-rider/endpoints
+POST /api/delivery-rider/shipments
+GET  /api/delivery-rider/tracking/:trackingNumber
+GET  /api/delivery-rider/notifications/:riderId
+POST /api/delivery-rider/notifications
+GET  /api/delivery-rider/performance/:riderId
+GET  /api/delivery-rider/analytics/summary
+POST /api/delivery-rider/returns
 ```
 
-## Integration Status
-
-```text
-Authentication System - Integrated
-Order Management System - Integrated on Delivery Rider Portal side
-Customer Tracking Portal - Prepared endpoint
-Notification System - Prepared endpoint
-Delivery Performance Monitoring System - Prepared endpoint
-Analytics Dashboard System - Prepared endpoint
-Return Management System - Pending
-```
+For request bodies and setup details, see `INTEGRATION_ENDPOINTS.md`.

@@ -12,6 +12,27 @@ const JWT_SECRET = process.env.JWT_SECRET || 'young_stunna_secret_key_change_me'
 const INTEGRATION_API_KEY = process.env.INTEGRATION_API_KEY || 'demo-integration-key';
 const AUTH_MODE = (process.env.AUTH_MODE || 'external').toLowerCase();
 const AUTH_SERVICE_URL = (process.env.AUTH_SERVICE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+
+// Future-ready service URLs. Update these in .env when other modules are available.
+const SERVICE_URLS = {
+  orderManagement: (process.env.ORDER_MANAGEMENT_SERVICE_URL || '').replace(/\/+$/, ''),
+  notification: (process.env.NOTIFICATION_SERVICE_URL || '').replace(/\/+$/, ''),
+  customerTracking: (process.env.CUSTOMER_TRACKING_SERVICE_URL || '').replace(/\/+$/, ''),
+  performanceMonitoring: (process.env.PERFORMANCE_MONITORING_SERVICE_URL || '').replace(/\/+$/, ''),
+  analytics: (process.env.ANALYTICS_SERVICE_URL || '').replace(/\/+$/, ''),
+  returnManagement: (process.env.RETURN_MANAGEMENT_SERVICE_URL || '').replace(/\/+$/, '')
+};
+
+// Future-ready endpoint paths. Change these in .env if the other groups use different route names.
+const SERVICE_PATHS = {
+  orderAssignments: process.env.ORDER_MANAGEMENT_ASSIGNMENTS_PATH || '/api/orders/assigned',
+  notificationCreate: process.env.NOTIFICATION_CREATE_PATH || '/api/notifications',
+  customerTrackingUpdate: process.env.CUSTOMER_TRACKING_UPDATE_PATH || '/api/tracking/status',
+  performanceRecord: process.env.PERFORMANCE_RECORD_PATH || '/api/performance/deliveries',
+  analyticsEvent: process.env.ANALYTICS_EVENT_PATH || '/api/analytics/delivery-events',
+  returnCreate: process.env.RETURN_CREATE_PATH || '/api/returns'
+};
+
 const allowedStatuses = ['Pending', 'Out for Delivery', 'Delivered', 'Failed'];
 
 app.use(cors());
@@ -38,6 +59,82 @@ async function callAuthService(path, options = {}) {
   }
 
   return data;
+}
+
+function buildServiceUrl(serviceUrl, path) {
+  if (!serviceUrl) return null;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${serviceUrl}${cleanPath}`;
+}
+
+async function safePostToService(serviceName, serviceUrl, path, payload) {
+  const url = buildServiceUrl(serviceUrl, path);
+  if (!url) return { skipped: true, service: serviceName };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    const data = await response.json().catch(() => ({}));
+    return { service: serviceName, ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { service: serviceName, ok: false, error: error.message };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function notifyConnectedModules(delivery, eventType = 'status_update', remarks = '') {
+  if (!delivery) return [];
+
+  const payload = {
+    eventType,
+    orderId: delivery.order_id,
+    deliveryId: delivery.delivery_id,
+    riderId: delivery.rider_id,
+    trackingNumber: delivery.tracking_number,
+    recipientName: delivery.recipient_name,
+    recipientContact: delivery.recipient_contact,
+    deliveryAddress: delivery.recipient_address,
+    status: delivery.status,
+    remarks,
+    updatedAt: new Date().toISOString()
+  };
+
+  const tasks = [
+    safePostToService('Customer Tracking Portal', SERVICE_URLS.customerTracking, SERVICE_PATHS.customerTrackingUpdate, payload),
+    safePostToService('Notification System', SERVICE_URLS.notification, SERVICE_PATHS.notificationCreate, {
+      riderId: payload.riderId,
+      title: `Delivery ${payload.status}`,
+      message: `${payload.trackingNumber} is now ${payload.status}.`,
+      type: 'delivery_status',
+      data: payload
+    }),
+    safePostToService('Delivery Performance Monitoring System', SERVICE_URLS.performanceMonitoring, SERVICE_PATHS.performanceRecord, payload),
+    safePostToService('Analytics Dashboard System', SERVICE_URLS.analytics, SERVICE_PATHS.analyticsEvent, payload)
+  ];
+
+  if (delivery.status === 'Failed') {
+    tasks.push(
+      safePostToService('Return Management System', SERVICE_URLS.returnManagement, SERVICE_PATHS.returnCreate, {
+        ...payload,
+        returnReason: remarks || 'Delivery failed.'
+      })
+    );
+  }
+
+  const results = await Promise.all(tasks);
+  results
+    .filter((result) => result && result.ok === false)
+    .forEach((result) => console.warn(`Integration warning: ${result.service}`, result.error || result.status));
+  return results;
 }
 
 function formatAuthUserName(user) {
@@ -83,9 +180,9 @@ async function ensureLocalRiderFromAuthUser(authUser) {
   if (Number.isInteger(authUserId) && authUserId > 0) {
     try {
       await db.execute(
-        `INSERT INTO riders (rider_id, full_name, email, contact_number, vehicle_type, plate_number)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [authUserId, fullName, email, contactNumber, vehicleType, plateNumber]
+        `INSERT INTO riders (rider_id, full_name, email, password_hash, contact_number, vehicle_type, plate_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [authUserId, fullName, email, hashPassword(`external-${authUserId}-${email}`), contactNumber, vehicleType, plateNumber]
       );
     } catch (error) {
       // If rider_id is already taken, fall back to auto-increment insert below.
@@ -100,9 +197,9 @@ async function ensureLocalRiderFromAuthUser(authUser) {
 
   if (!rows.length) {
     await db.execute(
-      `INSERT INTO riders (full_name, email, contact_number, vehicle_type, plate_number)
-       VALUES (?, ?, ?, ?, ?)`,
-      [fullName, email, contactNumber, vehicleType, plateNumber]
+      `INSERT INTO riders (full_name, email, password_hash, contact_number, vehicle_type, plate_number)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [fullName, email, hashPassword(`external-${Date.now()}-${email}`), contactNumber, vehicleType, plateNumber]
     );
 
     [rows] = await db.execute(
@@ -359,7 +456,12 @@ app.put('/api/deliveries/:id/status', authMiddleware, async (req, res) => {
       [req.params.id, req.rider.rider_id]
     );
 
-    res.json({ message: 'Delivery status updated successfully.', delivery: updatedRows[0] });
+    const delivery = updatedRows[0];
+    notifyConnectedModules(delivery, 'status_update', remarks || `Status updated to ${status}.`).catch((error) => {
+      console.warn('External integration notification failed:', error.message);
+    });
+
+    res.json({ message: 'Delivery status updated successfully.', delivery });
   } catch (error) {
     await connection.rollback();
     console.error(error);
@@ -404,7 +506,12 @@ app.post('/api/deliveries/:id/confirm', authMiddleware, async (req, res) => {
       [req.params.id, req.rider.rider_id]
     );
 
-    res.json({ message: 'Delivery confirmed successfully.', delivery: updatedRows[0] });
+    const delivery = updatedRows[0];
+    notifyConnectedModules(delivery, 'delivery_confirmed', 'Delivery confirmed successfully.').catch((error) => {
+      console.warn('External integration notification failed:', error.message);
+    });
+
+    res.json({ message: 'Delivery confirmed successfully.', delivery });
   } catch (error) {
     await connection.rollback();
     console.error(error);
@@ -668,11 +775,16 @@ app.post('/api/delivery-rider/shipments', async (req, res) => {
     await connection.commit();
 
     const [rows] = await db.execute('SELECT * FROM deliveries WHERE delivery_id = ?', [deliveryId]);
+    const delivery = rows[0];
+
+    notifyConnectedModules(delivery, existing.length ? 'shipment_updated' : 'shipment_created', 'Order Management sent shipment data.').catch((error) => {
+      console.warn('External integration notification failed:', error.message);
+    });
 
     res.status(existing.length ? 200 : 201).json({
       message: existing.length ? 'Shipment updated in Delivery Rider Portal.' : 'Shipment created in Delivery Rider Portal.',
-      shipment: rows[0],
-      delivery: rows[0]
+      shipment: delivery,
+      delivery
     });
   } catch (error) {
     await connection.rollback();
@@ -681,6 +793,204 @@ app.post('/api/delivery-rider/shipments', async (req, res) => {
   } finally {
     connection.release();
   }
+});
+
+
+// Public endpoint for Customer Tracking Portal.
+// Other modules can use this to display current delivery status by tracking number.
+app.get('/api/delivery-rider/tracking/:trackingNumber', async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT tracking_number, order_id, recipient_name, recipient_contact, recipient_address,
+              item_description, payment_method, total_amount, status, assigned_date, delivered_date, updated_at
+       FROM deliveries
+       WHERE tracking_number = ?`,
+      [req.params.trackingNumber]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: 'Tracking number not found.' });
+    }
+
+    res.json({ tracking: rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Unable to fetch tracking status.' });
+  }
+});
+
+// Endpoint for Notification System.
+// Notification module can fetch rider alerts based on active deliveries.
+app.get('/api/delivery-rider/notifications/:riderId', integrationMiddleware, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT delivery_id, order_id, tracking_number, status, recipient_name, assigned_date, updated_at
+       FROM deliveries
+       WHERE rider_id = ? AND status IN ('Pending', 'Out for Delivery')
+       ORDER BY updated_at DESC`,
+      [req.params.riderId]
+    );
+
+    const notifications = rows.map((delivery) => ({
+      riderId: Number(req.params.riderId),
+      deliveryId: delivery.delivery_id,
+      title: delivery.status === 'Pending' ? 'New delivery assigned' : 'Delivery in progress',
+      message: `${delivery.tracking_number} for ${delivery.recipient_name} is ${delivery.status}.`,
+      type: 'delivery',
+      delivery
+    }));
+
+    res.json({ notifications });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Unable to fetch rider notifications.' });
+  }
+});
+
+// Endpoint for Notification System.
+// This receives notification acknowledgements or messages from another module.
+app.post('/api/delivery-rider/notifications', integrationMiddleware, async (req, res) => {
+  const { riderId, title, message, type = 'general', data = {} } = req.body || {};
+
+  if (!riderId || !title || !message) {
+    return res.status(400).json({ message: 'riderId, title, and message are required.' });
+  }
+
+  res.status(201).json({
+    message: 'Notification payload received by Delivery Rider Portal.',
+    notification: { riderId, title, message, type, data }
+  });
+});
+
+// Endpoint for Delivery Performance Monitoring System.
+// Other modules can fetch rider performance summary from this portal.
+app.get('/api/delivery-rider/performance/:riderId', integrationMiddleware, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT
+         rider_id,
+         COUNT(*) AS total_assigned,
+         SUM(status = 'Delivered') AS completed_deliveries,
+         SUM(status = 'Failed') AS failed_deliveries,
+         SUM(status IN ('Pending', 'Out for Delivery')) AS active_deliveries,
+         ROUND(AVG(CASE
+           WHEN status = 'Delivered' AND delivered_date IS NOT NULL
+           THEN TIMESTAMPDIFF(MINUTE, assigned_date, delivered_date)
+         END), 2) AS average_delivery_minutes
+       FROM deliveries
+       WHERE rider_id = ?
+       GROUP BY rider_id`,
+      [req.params.riderId]
+    );
+
+    res.json({ performance: rows[0] || null });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Unable to fetch rider performance.' });
+  }
+});
+
+// Endpoint for Analytics Dashboard System.
+// Dashboard module can use this for charts and reports.
+app.get('/api/delivery-rider/analytics/summary', integrationMiddleware, async (req, res) => {
+  try {
+    const [summaryRows] = await db.execute(
+      `SELECT
+         COUNT(*) AS total_deliveries,
+         SUM(status = 'Pending') AS pending_deliveries,
+         SUM(status = 'Out for Delivery') AS out_for_delivery,
+         SUM(status = 'Delivered') AS delivered_deliveries,
+         SUM(status = 'Failed') AS failed_deliveries,
+         COALESCE(SUM(total_amount), 0) AS total_delivery_amount
+       FROM deliveries`
+    );
+
+    const [dailyRows] = await db.execute(
+      `SELECT DATE(assigned_date) AS delivery_date, COUNT(*) AS total
+       FROM deliveries
+       GROUP BY DATE(assigned_date)
+       ORDER BY delivery_date DESC
+       LIMIT 7`
+    );
+
+    res.json({ summary: summaryRows[0], daily: dailyRows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Unable to fetch analytics summary.' });
+  }
+});
+
+// Endpoint for Return Management System.
+// Return module can report failed or returned delivery records.
+app.post('/api/delivery-rider/returns', integrationMiddleware, async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    const { trackingNumber, tracking_number, orderId, order_id, reason = 'Return request received.' } = req.body || {};
+    const tracking = trackingNumber || tracking_number;
+    const order = orderId || order_id;
+
+    if (!tracking && !order) {
+      return res.status(400).json({ message: 'trackingNumber or orderId is required.' });
+    }
+
+    await connection.beginTransaction();
+
+    const [rows] = await connection.execute(
+      `SELECT * FROM deliveries
+       WHERE (? IS NOT NULL AND tracking_number = ?) OR (? IS NOT NULL AND order_id = ?)
+       LIMIT 1 FOR UPDATE`,
+      [tracking || null, tracking || null, order || null, order || null]
+    );
+
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Delivery record not found.' });
+    }
+
+    const delivery = rows[0];
+
+    await connection.execute(
+      `UPDATE deliveries
+       SET status = 'Failed', delivered_date = NULL
+       WHERE delivery_id = ?`,
+      [delivery.delivery_id]
+    );
+
+    await connection.execute(
+      'INSERT INTO delivery_status_logs (delivery_id, status, remarks) VALUES (?, ?, ?)',
+      [delivery.delivery_id, 'Failed', `Return Management: ${reason}`]
+    );
+
+    await connection.commit();
+
+    const [updatedRows] = await db.execute('SELECT * FROM deliveries WHERE delivery_id = ?', [delivery.delivery_id]);
+    res.json({ message: 'Return record processed by Delivery Rider Portal.', delivery: updatedRows[0] });
+  } catch (error) {
+    await connection.rollback();
+    console.error(error);
+    res.status(500).json({ message: 'Unable to process return request.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// Quick endpoint list for classmates.
+app.get('/api/delivery-rider/endpoints', (req, res) => {
+  res.json({
+    service: 'Delivery Rider Portal',
+    baseUrl: `http://localhost:${PORT}`,
+    integrationKeyHeader: 'x-integration-key',
+    endpoints: {
+      receiveOrderShipment: 'POST /api/delivery-rider/shipments',
+      getTrackingStatus: 'GET /api/delivery-rider/tracking/:trackingNumber',
+      getRiderNotifications: 'GET /api/delivery-rider/notifications/:riderId',
+      receiveNotification: 'POST /api/delivery-rider/notifications',
+      getRiderPerformance: 'GET /api/delivery-rider/performance/:riderId',
+      getAnalyticsSummary: 'GET /api/delivery-rider/analytics/summary',
+      receiveReturnRequest: 'POST /api/delivery-rider/returns'
+    }
+  });
 });
 
 app.listen(PORT, () => {
